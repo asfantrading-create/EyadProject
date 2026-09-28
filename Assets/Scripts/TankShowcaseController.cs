@@ -83,12 +83,12 @@ public class TankShowcaseController : MonoBehaviour
     [SerializeField] bool smoothEasing = true;
     [SerializeField] bool playOnStart = true;
 
-    [Header("الكبسات (UI)")]
-    [SerializeField] Button playButton;
-    [SerializeField] Button pauseButton;
-    [SerializeField] Button forward5Button;
-    [SerializeField] Button back5Button;
-    [SerializeField] Button replayButton;
+    [Header("الكبسات (UI Toggle)")]
+    [SerializeField] Toggle playToggle;
+    [SerializeField] Toggle pauseToggle;
+    [SerializeField] Toggle forward5Toggle;
+    [SerializeField] Toggle back5Toggle;
+    [SerializeField] Toggle replayToggle;
     [SerializeField] float skipSeconds = 5f;
 
     [Header("السلايدر ووقت العرض (اختياري)")]
@@ -127,11 +127,11 @@ public class TankShowcaseController : MonoBehaviour
 
     void OnDestroy()
     {
-        if (playButton) playButton.onClick.RemoveListener(Play);
-        if (pauseButton) pauseButton.onClick.RemoveListener(Pause);
-        if (forward5Button) forward5Button.onClick.RemoveListener(Forward5);
-        if (back5Button) back5Button.onClick.RemoveListener(Back5);
-        if (replayButton) replayButton.onClick.RemoveListener(Replay);
+        if (playToggle) playToggle.onValueChanged.RemoveListener(OnPlayToggle);
+        if (pauseToggle) pauseToggle.onValueChanged.RemoveListener(OnPauseToggle);
+        if (forward5Toggle) forward5Toggle.onValueChanged.RemoveListener(OnForward5Toggle);
+        if (back5Toggle) back5Toggle.onValueChanged.RemoveListener(OnBack5Toggle);
+        if (replayToggle) replayToggle.onValueChanged.RemoveListener(OnReplayToggle);
         if (timelineSlider) timelineSlider.onValueChanged.RemoveListener(OnSliderChanged);
     }
 
@@ -298,19 +298,42 @@ public class TankShowcaseController : MonoBehaviour
 
     void HookUI()
     {
-        if (playButton) playButton.onClick.AddListener(Play);
-        if (pauseButton) pauseButton.onClick.AddListener(Pause);
-        if (forward5Button) forward5Button.onClick.AddListener(Forward5);
-        if (back5Button) back5Button.onClick.AddListener(Back5);
-        if (replayButton) replayButton.onClick.AddListener(Replay);
+        if (playToggle) playToggle.onValueChanged.AddListener(OnPlayToggle);
+        if (pauseToggle) pauseToggle.onValueChanged.AddListener(OnPauseToggle);
+        if (forward5Toggle) forward5Toggle.onValueChanged.AddListener(OnForward5Toggle);
+        if (back5Toggle) back5Toggle.onValueChanged.AddListener(OnBack5Toggle);
+        if (replayToggle) replayToggle.onValueChanged.AddListener(OnReplayToggle);
         if (timelineSlider) timelineSlider.onValueChanged.AddListener(OnSliderChanged);
+    }
+
+    // الـ Toggle بيقلب قيمته مع كل كبسة، فأي تغيير بالقيمة = كبسة.
+    // بعدين إحنا بنرجّع قيمة isOn بدون ما نطلق الحدث، عشان تعكس الحالة الحقيقية.
+    void OnPlayToggle(bool _) => Play();
+    void OnPauseToggle(bool _) => Pause();
+
+    void OnForward5Toggle(bool _)
+    {
+        Forward5();
+        forward5Toggle.SetIsOnWithoutNotify(false);
+    }
+
+    void OnBack5Toggle(bool _)
+    {
+        Back5();
+        back5Toggle.SetIsOnWithoutNotify(false);
+    }
+
+    void OnReplayToggle(bool _)
+    {
+        Replay();
+        replayToggle.SetIsOnWithoutNotify(false);
     }
 
     void RefreshButtons()
     {
-        // Play و Pause بيشتغلوا كـ Toggle: وحدة بتتفعل والثانية بتتطفى
-        if (playButton) playButton.interactable = !isPlaying;
-        if (pauseButton) pauseButton.interactable = isPlaying;
+        // Play و Pause: وحدة بتكون On والثانية Off حسب حالة التشغيل
+        if (playToggle) playToggle.SetIsOnWithoutNotify(isPlaying);
+        if (pauseToggle) pauseToggle.SetIsOnWithoutNotify(!isPlaying);
     }
 
     static string FormatTime(float seconds)
