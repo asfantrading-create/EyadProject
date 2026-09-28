@@ -9,6 +9,11 @@ A Fresnel/rim glow with a light whole-surface emission, driven by time:
 Everything is computed from `t = Time - _StartTime`, so writing `_StartTime` restarts the effect.
 `GlowPulseController.cs` (in `Assets/Scripts`) does that for you.
 
+> **Don't want to build the graph?** `GlowPulse.shader` in this folder is a ready-made
+> hand-written URP shader with the same behavior and properties (plus Metallic, Smoothness and
+> Surface Glow). Right-click it → **Create → Material** and skip to §6. It shows up in the shader
+> menu as **Custom/URP/GlowPulse**.
+
 > **Defaults used here** (the request template left these blank): glow color **cyan**,
 > Unity **2022.3 LTS / Unity 6** (URP 14–17), object type **3D mesh**. Differences between
 > versions are called out where they matter.
@@ -148,7 +153,7 @@ shader can reuse it.
 | 25 | **Lerp** | A = `ramp` (12), B = `pulse` (21), T = `handoff` (24) → **`Intensity`** |
 
 **Shortcut instead of 5–25:** add a **Custom Function** node, Type = **File**,
-Source = `Assets/Shaders/GlowPulse/GlowPulseIntensity.hlsl`, Name = `GlowPulseIntensity`.
+Source = `Assets/_Project/Shaders/GlowPulse/GlowPulseIntensity.hlsl`, Name = `GlowPulseIntensity`.
 Inputs (all Float): `Time, StartTime, RampDuration, MaxRampIntensity, PulseSpeed, PulseMin,
 PulseMax`; Output: `Intensity` (Float). Wire the Time node and the properties in. Same math.
 
