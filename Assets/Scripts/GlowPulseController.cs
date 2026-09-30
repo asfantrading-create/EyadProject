@@ -1,20 +1,21 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// بيشغّل شيدر GlowPulse (Shader Graph):
+/// بيشغّل الـ Outline المتوهج (GlowPulseOutline):
 ///   1) Idle: بدون توهج
 ///   2) Ramp-up: التوهج بيطلع من 0 لـ Max Ramp Intensity بـ smoothstep
 ///   3) Pulse: نبض بين Pulse Min و Pulse Max للأبد
 ///
-/// الشيدر بيحسب كل شي من (Time - _StartTime)، هاد السكربت بس بيكتب _StartTime.
+/// الشيدر بيحسب كل شي من (Time - _StartTime)، هاد السكربت بس بيكتب _StartTime
+/// على كل متريال عنده _StartTime (متريال الـ Outline)، ومتريال الجسم ما بيتأثر.
 /// </summary>
 [DisallowMultipleComponent]
-[RequireComponent(typeof(Renderer))]
 public class GlowPulseController : MonoBehaviour
 {
     public enum ApplyMode
     {
-        // نسخة خاصة من المتريال لكل Renderer (renderer.materials) — بتضل متوافقة مع SRP Batcher
+        // نسخة خاصة من متريال الـ Outline لكل Renderer — بتضل متوافقة مع SRP Batcher
         InstancedMaterial,
         // MaterialPropertyBlock — بدون نسخ متريال، بس الـ Renderer بيطلع من SRP Batcher
         PropertyBlock
@@ -31,9 +32,12 @@ public class GlowPulseController : MonoBehaviour
     [Tooltip("InstancedMaterial: نسخة متريال لكل أوبجكت. PropertyBlock: بدون نسخ.")]
     public ApplyMode applyMode = ApplyMode.InstancedMaterial;
 
-    Renderer _renderer;
+    [Tooltip("كمان الـ Renderers اللي بالأولاد (موديل من كذا قطعة، أو نسخة Outline كـ child)")]
+    public bool includeChildren = false;
+
+    Renderer[] _renderers;
     MaterialPropertyBlock _block;
-    Material[] _instances;
+    readonly List<Material> _instances = new List<Material>();
     float _startTime = IdleStartTime;
 
     public bool IsGlowing => _startTime < IdleStartTime;
@@ -43,12 +47,36 @@ public class GlowPulseController : MonoBehaviour
 
     void Awake()
     {
-        _renderer = GetComponent<Renderer>();
+        _renderers = includeChildren
+            ? GetComponentsInChildren<Renderer>(true)
+            : GetComponents<Renderer>();
+
+        if (_renderers.Length == 0)
+            Debug.LogWarning($"{name}: GlowPulseController ما لقى أي Renderer", this);
 
         if (applyMode == ApplyMode.InstancedMaterial)
-            _instances = _renderer.materials; // بتعمل نسخ، بنمسحها بـ OnDestroy
+        {
+            // بننسخ بس المتريالات اللي عندها _StartTime، ومتريال الجسم بيضل مشترك زي ما هو
+            foreach (var r in _renderers)
+            {
+                var mats = r.sharedMaterials;
+                bool changed = false;
+                for (int i = 0; i < mats.Length; i++)
+                {
+                    if (mats[i] == null || !mats[i].HasProperty(StartTimeId))
+                        continue;
+                    mats[i] = new Material(mats[i]); // بنمسحها بـ OnDestroy
+                    _instances.Add(mats[i]);
+                    changed = true;
+                }
+                if (changed)
+                    r.sharedMaterials = mats;
+            }
+        }
         else
+        {
             _block = new MaterialPropertyBlock();
+        }
 
         // نبلّش دايماً من Idle مهما كانت القيمة المحفوظة بالمتريال
         Apply(IdleStartTime);
@@ -78,32 +106,33 @@ public class GlowPulseController : MonoBehaviour
     void Apply(float startTime)
     {
         _startTime = startTime;
-        if (_renderer == null)
+        if (_renderers == null)
             return; // ContextMenu بوضع الـ Edit قبل Awake
 
         if (applyMode == ApplyMode.InstancedMaterial)
         {
-            // كل المتريالات اللي عندها _StartTime (مثلاً متريال الـ Outline كمان)
             foreach (var mat in _instances)
             {
-                if (mat != null && mat.HasProperty(StartTimeId))
+                if (mat != null)
                     mat.SetFloat(StartTimeId, startTime);
             }
         }
         else
         {
             // الـ Block بيتطبق على كل الـ submeshes/المتريالات تبع الـ Renderer
-            _renderer.GetPropertyBlock(_block);
-            _block.SetFloat(StartTimeId, startTime);
-            _renderer.SetPropertyBlock(_block);
+            foreach (var r in _renderers)
+            {
+                if (r == null)
+                    continue;
+                r.GetPropertyBlock(_block);
+                _block.SetFloat(StartTimeId, startTime);
+                r.SetPropertyBlock(_block);
+            }
         }
     }
 
     void OnDestroy()
     {
-        if (_instances == null)
-            return;
-
         foreach (var mat in _instances)
         {
             if (mat != null)

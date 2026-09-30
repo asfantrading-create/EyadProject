@@ -2,7 +2,7 @@
 #define GLOW_PULSE_INTENSITY_INCLUDED
 
 // Optional shortcut for the Shader Graph "Custom Function" node (Type = File, Name = GlowPulseIntensity).
-// Same math as the node-by-node chain in GlowPulse_ShaderGraph_Guide.md.
+// Same math as the node-by-node chain in GlowPulse_Guide.md (§2c).
 //
 //   t        = Time - StartTime                       (negative => idle)
 //   ramp     = MaxRamp * smoothstep(0, D, t)          (0 -> MaxRamp, zero slope at t = D)

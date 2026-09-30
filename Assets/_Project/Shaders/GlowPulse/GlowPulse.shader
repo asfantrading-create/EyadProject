@@ -1,11 +1,8 @@
-// GlowPulse — URP Lit-style shader with a timed Fresnel glow.
+// GlowPulse — body shader: a plain URP Lit-style surface with NO emission.
 //
-//   Idle     : _StartTime far in the future (default 1e9) => no glow, looks like a normal Lit material.
-//   Ramp-up  : glow 0 -> _MaxRampIntensity over _RampDuration seconds (smoothstep).
-//   Pulse    : endless cosine pulse between _PulseMin and _PulseMax, C1-smooth hand-off from the ramp.
-//
-// Timing is (Time - _StartTime); GlowPulseController.StartGlow() / ResetGlow() write _StartTime.
-// Emission = _GlowColor (HDR) * Intensity * (Fresnel + _SurfaceGlow)  -> use Bloom to make it glow.
+// The glow is now an outline only and lives in GlowPulseOutline.shader, used as a second material
+// on the same renderer. This shader just keeps the object looking completely normal; the standard
+// "Universal Render Pipeline/Lit" shader works just as well for the body.
 //
 // Written against the URP 14 (2022.3) and URP 17 (Unity 6.0 - 6.3) include APIs.
 // Not supported: lightmaps / Adaptive Probe Volumes (ambient comes from light probes / SH only).
@@ -18,19 +15,6 @@ Shader "Custom/URP/GlowPulse"
         _Metallic("Metallic", Range(0, 1)) = 0
         _Smoothness("Smoothness", Range(0, 1)) = 0.5
 
-        [Header(Glow)]
-        [HDR] _GlowColor("Glow Color", Color) = (0, 4, 4, 1)
-        _MaxRampIntensity("Max Ramp Intensity", Float) = 2
-        _FresnelPower("Fresnel Power", Range(0.5, 10)) = 3
-        _SurfaceGlow("Surface Glow", Range(0, 1)) = 0.25
-
-        [Header(Timing)]
-        _RampDuration("Ramp Duration (s)", Float) = 1.5
-        _PulseSpeed("Pulse Speed (pulses per s)", Float) = 1
-        _PulseMin("Pulse Min", Float) = 0.8
-        _PulseMax("Pulse Max", Float) = 2
-
-        [HideInInspector] _StartTime("Start Time", Float) = 1000000000
         // Needed by URP's shared ShadowCaster/Depth passes (only read when _ALPHATEST_ON, which is never set here)
         [HideInInspector] _Cutoff("Alpha Cutoff", Float) = 0.5
     }
@@ -54,15 +38,6 @@ Shader "Custom/URP/GlowPulse"
             half4 _BaseColor;
             half _Metallic;
             half _Smoothness;
-            half4 _GlowColor;
-            float _MaxRampIntensity;
-            float _FresnelPower;
-            float _SurfaceGlow;
-            float _RampDuration;
-            float _PulseSpeed;
-            float _PulseMin;
-            float _PulseMax;
-            float _StartTime;
             half _Cutoff;
         CBUFFER_END
         ENDHLSL
@@ -100,7 +75,6 @@ Shader "Custom/URP/GlowPulse"
             #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
-            #include "GlowPulseIntensity.hlsl"
 
             struct Attributes
             {
@@ -156,16 +130,7 @@ Shader "Custom/URP/GlowPulse"
                 float3 normalWS = normalize(input.normalWS);
                 half3 viewDirWS = GetWorldSpaceNormalizeViewDir(input.positionWS);
 
-                // --- Glow timing: idle -> ramp -> pulse ---
-                float intensity;
-                GlowPulseIntensity_float(_TimeParameters.x, _StartTime, _RampDuration, _MaxRampIntensity,
-                                         _PulseSpeed, _PulseMin, _PulseMax, intensity);
-
-                // --- Fresnel rim + light whole-surface glow ---
-                float fresnel = pow(1.0 - saturate(dot(normalWS, viewDirWS)), _FresnelPower);
-                half3 emission = _GlowColor.rgb * intensity * (fresnel + _SurfaceGlow);
-
-                // --- Standard PBR surface ---
+                // Standard PBR surface, no emission: the glow is drawn by GlowPulseOutline.shader
                 half4 albedoAlpha = SampleAlbedoAlpha(input.uv, TEXTURE2D_ARGS(_BaseMap, sampler_BaseMap));
 
                 SurfaceData surfaceData = (SurfaceData)0;
@@ -176,7 +141,7 @@ Shader "Custom/URP/GlowPulse"
                 surfaceData.smoothness = _Smoothness;
                 surfaceData.occlusion = 1.0;
                 surfaceData.normalTS = half3(0, 0, 1);
-                surfaceData.emission = emission;
+                surfaceData.emission = half3(0, 0, 0);
 
                 InputData inputData = (InputData)0;
                 inputData.positionWS = input.positionWS;
