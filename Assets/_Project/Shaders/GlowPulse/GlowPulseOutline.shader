@@ -9,6 +9,14 @@
 //   Pulse    : endless cosine pulse between _PulseMin and _PulseMax, C1-smooth hand-off from the ramp.
 //
 // Color = _GlowColor (HDR) * Intensity, blended additively so it fades in from nothing and blooms.
+//
+// Normals: the hull is pushed along SMOOTHED normals baked into UV channel 3 (TEXCOORD3) by the
+// editor tool in Editor/GlowPulseSmoothNormals.cs. Hard-edged meshes (split normals) crack and
+// spike without them. Meshes that were not baked fall back to the regular vertex normal.
+//
+// Silhouette Only: GlowPulse.shader marks body pixels in the stencil buffer; with
+// _OutlineStencilComp = NotEqual the outline is never drawn on top of the body, only around it.
+//
 // Timing is (Time - _StartTime); GlowPulseController.StartGlow() / ResetGlow() write _StartTime.
 //
 // Why a separate material in the Transparent queue instead of an extra pass in GlowPulse.shader:
@@ -20,6 +28,9 @@ Shader "Custom/URP/GlowPulseOutline"
     {
         [HDR] _GlowColor("Glow Color", Color) = (0, 4, 4, 1)
         _OutlineWidth("Outline Width (world units)", Range(0, 0.1)) = 0.02
+        [ToggleUI] _UseSmoothedNormals("Use Baked Smoothed Normals (UV3)", Float) = 1
+        // NotEqual = Silhouette Only (needs the GlowPulse body shader). Always = off.
+        [Enum(UnityEngine.Rendering.CompareFunction)] _OutlineStencilComp("Silhouette Only (Stencil)", Float) = 6
 
         [Header(Timing)]
         _MaxRampIntensity("Max Ramp Intensity", Float) = 2
@@ -51,6 +62,13 @@ Shader "Custom/URP/GlowPulseOutline"
             ZWrite On           // stops overlapping hull layers (concave meshes) from adding up twice
             Blend One One       // additive: dim = faint, bright HDR = bloom
 
+            Stencil
+            {
+                Ref 4
+                ReadMask 4
+                Comp [_OutlineStencilComp]
+            }
+
             HLSLPROGRAM
             #pragma target 2.0
             #pragma vertex OutlineVertex
@@ -64,6 +82,7 @@ Shader "Custom/URP/GlowPulseOutline"
             CBUFFER_START(UnityPerMaterial)
                 half4 _GlowColor;
                 float _OutlineWidth;
+                float _UseSmoothedNormals;
                 float _MaxRampIntensity;
                 float _RampDuration;
                 float _PulseSpeed;
@@ -76,6 +95,7 @@ Shader "Custom/URP/GlowPulseOutline"
             {
                 float4 positionOS : POSITION;
                 float3 normalOS   : NORMAL;
+                float3 smoothNormalOS : TEXCOORD3; // baked by GlowPulseSmoothNormals, (0,0,0) if not baked
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
@@ -101,9 +121,13 @@ Shader "Custom/URP/GlowPulseOutline"
                                          _PulseSpeed, _PulseMin, _PulseMax, intensity);
                 intensity = max(intensity, 0.0);
 
+                // Smoothed normal if the mesh was baked, otherwise the real vertex normal
+                bool hasSmoothed = _UseSmoothedNormals > 0.5 && dot(input.smoothNormalOS, input.smoothNormalOS) > 1e-6;
+                float3 normalOS = hasSmoothed ? input.smoothNormalOS : input.normalOS;
+
                 // Inflate along the world-space normal so the width is in world units even on scaled objects
                 float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
-                float3 normalWS = normalize(TransformObjectToWorldNormal(input.normalOS));
+                float3 normalWS = normalize(TransformObjectToWorldNormal(normalOS));
                 positionWS += normalWS * _OutlineWidth;
 
                 float4 positionCS = TransformWorldToHClip(positionWS);

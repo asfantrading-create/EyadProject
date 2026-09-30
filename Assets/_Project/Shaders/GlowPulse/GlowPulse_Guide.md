@@ -17,6 +17,7 @@ Everything is computed from `t = Time - _StartTime`; `GlowPulseController.cs`
 | `GlowPulse.shader` (**Custom/URP/GlowPulse**) | Body. Plain Lit-style surface, **no emission**. (Standard *URP/Lit* works just as well.) |
 | `GlowPulseOutline.shader` (**Custom/URP/GlowPulseOutline**) | The glowing outline. Goes in a **second material slot** on the same renderer. |
 | `GlowPulseIntensity.hlsl` | Shared idle → ramp → pulse math (used by the outline shader, or a Shader Graph Custom Function). |
+| `Editor/GlowPulseSmoothNormals.cs` | Editor tool: bakes smoothed normals into UV3 so the hull doesn't crack on hard edges (§5). |
 
 > **Defaults** (never specified): glow color **cyan**, Unity **2022.3 LTS / Unity 6** (URP 14–17),
 > **3D mesh**.
@@ -150,15 +151,20 @@ PulseMax`; Output: `Intensity` (Float). Wire the Time node and the properties in
 | # | Node | Connections |
 |---|---|---|
 | 26 | **Position** | Space = **World** |
-| 27 | **Normal Vector** | Space = **World** |
+| 27a | **UV** | Channel = **UV3** (baked smoothed normal, see §5) |
+| 27b | **Transform** | From **Object** To **World**, Type **Direction**, In = UV3 `xyz` → then **Normalize** |
 | 28 | **Outline Width** (drag) | |
-| 29 | **Multiply** | A = Normal Vector, B = Outline Width |
+| 29 | **Multiply** | A = node 27b, B = Outline Width |
 | 30 | **Add** | A = Position (26), B = node 29 → inflated world position |
 | 31 | **Transform** | From **World** To **Object**, Type **Position**, In = node 30 |
 | 32 | **Step** | Edge = `0.0001`, In = `Intensity` (25) → 1 while glowing, 0 when idle |
 | 33 | **Multiply** | A = node 31, B = node 32 → **Vertex › Position** |
 
 Multiplying by 0 when idle puts every vertex at the object origin: zero-area triangles, nothing drawn.
+
+Only use UV3 on meshes baked with the §5 tool (otherwise use a **Normal Vector** node, Space World,
+for 27a/27b). Shader Graph has no stencil settings, so *Silhouette Only* (§5) is only available in
+`GlowPulseOutline.shader`.
 
 ### 2e. Fragment: color
 
@@ -183,7 +189,8 @@ Alpha stays 1. **Save Asset**, then right-click the graph → **Create → Mater
 ### Fix the existing body material
 3. Select your existing `M_GlowPulse`. It still uses `Custom/URP/GlowPulse`, which now has **no
    glow**; the old Glow/Timing fields disappear from the Inspector (stale values stay serialized
-   but are unused). Nothing else to do. (Or switch it to *Universal Render Pipeline/Lit*.)
+   but are unused). Keep it on `Custom/URP/GlowPulse`: it writes the stencil mark that
+   *Silhouette Only* needs (§5). For open/single-sided models set **Render Face (Cull) = Off**.
 
 ### Renderer: two material slots
 4. Select the object → **Mesh Renderer › Materials** → click **+** so the list has 2 entries:
@@ -220,20 +227,55 @@ Press Play and call `StartGlow()`.
 
 ---
 
-## 5. Limitations and fixes
+## 5. Smoothed normals, silhouette-only, open meshes
 
-- **Gaps at hard edges / corners.** The hull follows vertex normals; meshes with split normals
-  (cubes, low-poly) crack at corners. Fix: duplicate the model file, set the copy's
-  **Import Settings → Normals: Calculate, Smoothing Angle 180**, and use that copy only for an
-  outline child renderer (setup as in the next bullet), so the body keeps its hard shading.
-- **Meshes with several sub-meshes** (several materials on one renderer): an extra material slot
-  only wraps the **last** sub-mesh. Fix: add a child GameObject with the same mesh
-  (MeshFilter + MeshRenderer, *Cast Shadows Off*), put `M_GlowOutline` in **every** slot there,
-  and tick **Include Children** on the parent's `GlowPulseController`.
+### Why the outline breaks on some models
+The hull is pushed out along each vertex normal. On hard-edged models every corner vertex is
+split into copies with different normals, so the hull tears open there (gaps, spikes, blobs).
+Open or single-sided surfaces (thin sheets, blades) have no back side, so seen from behind the
+whole inflated sheet shows as solid glow.
+
+### Fix 1: bake smoothed normals (UV3)
+`Editor/GlowPulseSmoothNormals.cs` averages the normals of all vertices that share a position
+(angle-weighted) and stores the result in **UV channel 3**. The mesh's real normals are **not**
+changed, so the body's shading stays exactly the same. `GlowPulseOutline.shader` reads UV3
+(`Use Baked Smoothed Normals` toggle, on by default) and falls back to the real normals on meshes
+that weren't baked.
+
+**Imported model (FBX/OBJ/...):**
+1. Project window → select the model file(s) (the `.fbx`, not the prefab in the scene).
+2. Right-click → **GlowPulse → Enable Smoothed Outline Normals**.
+   This tags the importer and **re-imports** the model; the bake runs automatically on every
+   future re-import too. Scene instances update by themselves; no prefab changes needed.
+3. To undo: right-click → **GlowPulse → Disable Smoothed Outline Normals**.
+
+**Mesh not from a model file** (ProBuilder, generated meshes): select the GameObject →
+**Tools → GlowPulse → Bake Smoothed Normals Into Mesh Copy**, pick where to save the `.asset`;
+the copy is assigned to the MeshFilter (Undo-able).
+
+Notes: don't also use UV3 for something else on these meshes. Skinned (animated) meshes get the
+bind-pose smoothed normals, which is fine for small deformations but can drift on big ones.
+
+### Fix 2: Silhouette Only (stencil)
+`GlowPulse.shader` (the body) marks its pixels in the stencil buffer. On the outline material,
+**Silhouette Only (Stencil) = NotEqual** (default) makes the outline skip those pixels, so it is
+never drawn *on top of* the body, only around it. Set it to **Always** to get the old behavior
+(inner silhouette lines too). This needs the **GlowPulse body shader**; with URP/Lit on the body
+it simply has no effect. Side effect: where one glowing object overlaps another, the front
+object's outline is hidden over the back object's body.
+
+### Fix 3: open / single-sided meshes
+On the body material set **Render Face (Cull) = Off** (double-sided). The body then fills the
+back side too, which hides the hull there (and writes the stencil mark). Back faces are lit with
+flipped normals.
+
+### Other limitations
+- **Outline width is in world units.** If the model is small (or imported at a small scale), `0.02`
+  can be thicker than thin parts like pistons. Reduce it until it's a thin line.
+- **Several sub-meshes on one renderer:** an extra material slot only wraps the **last** sub-mesh.
+  Add a child GameObject with the same mesh (MeshFilter + MeshRenderer, *Cast Shadows Off*), put
+  `M_GlowOutline` in **every** slot there, and tick **Include Children** on the controller.
 - **Models made of several child renderers** (e.g. hull + turret): add the second slot to each
   renderer, put the controller on the root, tick **Include Children**.
-- **Width is in world units**, so it looks thinner far away. Increase `_OutlineWidth` for distant objects.
-- **Skinned meshes** work the same way (second material slot on the SkinnedMeshRenderer).
 - **Shared timing for many objects** via a *Render Objects* Renderer Feature is possible, but an
-  override material means one `_StartTime` for all of them; the per-object slot setup above is
-  what keeps each object independently restartable.
+  override material means one `_StartTime` for all of them.

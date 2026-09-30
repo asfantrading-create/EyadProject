@@ -2,7 +2,8 @@
 //
 // The glow is now an outline only and lives in GlowPulseOutline.shader, used as a second material
 // on the same renderer. This shader just keeps the object looking completely normal; the standard
-// "Universal Render Pipeline/Lit" shader works just as well for the body.
+// "Universal Render Pipeline/Lit" shader works for the body too, but only this shader writes the
+// stencil mark that lets the outline stay strictly outside the silhouette (Silhouette Only).
 //
 // Written against the URP 14 (2022.3) and URP 17 (Unity 6.0 - 6.3) include APIs.
 // Not supported: lightmaps / Adaptive Probe Volumes (ambient comes from light probes / SH only).
@@ -14,6 +15,8 @@ Shader "Custom/URP/GlowPulse"
         [MainColor] _BaseColor("Base Color", Color) = (1, 1, 1, 1)
         _Metallic("Metallic", Range(0, 1)) = 0
         _Smoothness("Smoothness", Range(0, 1)) = 0.5
+        // Back = normal. Off = double-sided, for open / single-sided meshes (thin sheets, blades)
+        [Enum(UnityEngine.Rendering.CullMode)] _Cull("Render Face (Cull)", Float) = 2
 
         // Needed by URP's shared ShadowCaster/Depth passes (only read when _ALPHATEST_ON, which is never set here)
         [HideInInspector] _Cutoff("Alpha Cutoff", Float) = 0.5
@@ -50,9 +53,20 @@ Shader "Custom/URP/GlowPulse"
             Name "ForwardLit"
             Tags { "LightMode" = "UniversalForwardOnly" }
 
-            Cull Back
+            Cull [_Cull]
             ZWrite On
             ZTest LEqual
+
+            // Marks the body's pixels (stencil bit 4, inside URP's free user bits) so
+            // GlowPulseOutline can skip them and only draw outside the silhouette.
+            Stencil
+            {
+                Ref 4
+                ReadMask 4
+                WriteMask 4
+                Comp Always
+                Pass Replace
+            }
 
             HLSLPROGRAM
             #pragma target 2.0
@@ -122,12 +136,14 @@ Shader "Custom/URP/GlowPulse"
                 return output;
             }
 
-            half4 GlowFragment(Varyings input) : SV_Target
+            half4 GlowFragment(Varyings input, FRONT_FACE_TYPE cullFace : FRONT_FACE_SEMANTIC) : SV_Target
             {
                 UNITY_SETUP_INSTANCE_ID(input);
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
+                // Double-sided (Render Face = Off): light back faces with the flipped normal
                 float3 normalWS = normalize(input.normalWS);
+                normalWS = IS_FRONT_VFACE(cullFace, normalWS, -normalWS);
                 half3 viewDirWS = GetWorldSpaceNormalizeViewDir(input.positionWS);
 
                 // Standard PBR surface, no emission: the glow is drawn by GlowPulseOutline.shader
@@ -180,7 +196,7 @@ Shader "Custom/URP/GlowPulse"
             ZWrite On
             ZTest LEqual
             ColorMask 0
-            Cull Back
+            Cull [_Cull]
 
             HLSLPROGRAM
             #pragma target 2.0
@@ -199,7 +215,7 @@ Shader "Custom/URP/GlowPulse"
 
             ZWrite On
             ColorMask R
-            Cull Back
+            Cull [_Cull]
 
             HLSLPROGRAM
             #pragma target 2.0
@@ -216,7 +232,7 @@ Shader "Custom/URP/GlowPulse"
             Tags { "LightMode" = "DepthNormalsOnly" }
 
             ZWrite On
-            Cull Back
+            Cull [_Cull]
 
             HLSLPROGRAM
             #pragma target 2.0
